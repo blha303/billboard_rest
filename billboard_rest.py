@@ -1,15 +1,60 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python2
 # MIT license, by Steven Smith (blha303)
 
 from billboard import ChartData
-from flask import Flask, jsonify, make_response, redirect, url_for, request
+from flask import Flask, jsonify, make_response, redirect, url_for, request, current_app, render_template
 from werkzeug import secure_filename
 from json import loads, load, dump
 from time import time
 import os
+from datetime import timedelta
+from functools import update_wrapper
 
 app = Flask(__name__)
 REDIR = None
+
+
+def crossdomain(origin=None, methods=None, headers=None,
+                max_age=21600, attach_to_all=True,
+                automatic_options=True):
+    if methods is not None:
+        methods = ', '.join(sorted(x.upper() for x in methods))
+    if headers is not None and not isinstance(headers, basestring):
+        headers = ', '.join(x.upper() for x in headers)
+    if not isinstance(origin, basestring):
+        origin = ', '.join(origin)
+    if isinstance(max_age, timedelta):
+        max_age = max_age.total_seconds()
+
+    def get_methods():
+        if methods is not None:
+            return methods
+
+        options_resp = current_app.make_default_options_response()
+        return options_resp.headers['allow']
+
+    def decorator(f):
+        def wrapped_function(*args, **kwargs):
+            if automatic_options and request.method == 'OPTIONS':
+                resp = current_app.make_default_options_response()
+            else:
+                resp = make_response(f(*args, **kwargs))
+            if not attach_to_all and request.method != 'OPTIONS':
+                return resp
+
+            h = resp.headers
+
+            h['Access-Control-Allow-Origin'] = origin
+            h['Access-Control-Allow-Methods'] = get_methods()
+            h['Access-Control-Max-Age'] = str(max_age)
+            if headers is not None:
+                h['Access-Control-Allow-Headers'] = headers
+            return resp
+
+        f.provide_automatic_options = False
+        return update_wrapper(wrapped_function, f)
+    return decorator
+
 
 def cache_get(chart, date):
     s_chart, s_date = secure_filename(chart), secure_filename(date)
@@ -34,11 +79,13 @@ def cache_write(chart, date, data):
         return False
 
 @app.route("/")
+@crossdomain(origin='*')
 def index():
     """ Lists available endpoints """
     return jsonify({rule.rule: globals()[rule.endpoint].__doc__ for rule in app.url_map.iter_rules() if rule.endpoint != "static"})
 
 @app.route("/chart/<chart>/")
+@crossdomain(origin='*')
 def chart(chart):
     """ Redirects to /chart/<chart>/<latest date>/ """
     global REDIR
@@ -47,7 +94,8 @@ def chart(chart):
     _ = cache_write(chart, REDIR[1].date, loads(REDIR[1].to_JSON()))
     return redirect(url_for("chart_date", chart=chart, date=REDIR[1].date))
 
-@app.route("/chart/<chart>/<date>/")
+@app.route("/chart/<chart>/date/<date>/")
+@crossdomain(origin='*')
 def chart_date(chart, date):
     """ Returns json for given chart directly from billboard.py """
     data = cache_get(chart, date)
@@ -57,7 +105,14 @@ def chart_date(chart, date):
                )
     return jsonify(data)
 
-@app.route("/chart/<chart>/<date>/<id>/")
+#@app.route("/chart/<chart>/date/<date>/iframe")
+#def chart_iframe(chart, date):
+#    """ Returns a html list of iframes for all spotify links in the chart """
+#    data = cache_get(chart, date)
+#    return render_template("iframes.html", entries=data["entries"])
+
+@app.route("/chart/<chart>/date/<date>/id/<id>/")
+@crossdomain(origin='*')
 def chart_item(chart, date, id):
     """ Returns detailed information for given chart, date and rank """
     try:
@@ -73,7 +128,8 @@ def chart_item(chart, date, id):
                )
     return jsonify(data["entries"][id])
 
-@app.route("/chart/<chart>/<date>/<id>/listen")
+@app.route("/chart/<chart>/date/<date>/id/<id>/listen")
+@crossdomain(origin='*')
 def chart_listen(chart, date, id):
     """ Redirects to the Spotify listen url for the given track ID """
     try:

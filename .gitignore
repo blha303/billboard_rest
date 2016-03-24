@@ -1,1 +1,5 @@
 cache/
+env/
+__pycache__/
+*.pid
+*.pyc
