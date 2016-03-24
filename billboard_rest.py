@@ -3,10 +3,35 @@
 
 from billboard import ChartData
 from flask import Flask, jsonify, make_response, redirect, url_for, request
-from json import dumps, loads
+from werkzeug import secure_filename
+from json import loads, load, dump
+from time import time
+import os
 
 app = Flask(__name__)
 REDIR = None
+
+def cache_get(chart, date):
+    s_chart, s_date = secure_filename(chart), secure_filename(date)
+    if not os.path.exists("cache/{}/".format(s_chart)):
+        os.makedirs("cache/{}/".format(s_chart))
+    try:
+        with open("cache/{}/{}.json".format(s_chart, s_date)) as f:
+            data = load(f)
+    except FileNotFoundError:
+        with open("cache/{}/{}.json".format(s_chart, s_date), "w") as f:
+            data = loads(ChartData(chart, date).to_JSON())
+            dump(data, f)
+    return data
+
+def cache_write(chart, date, data):
+    s_chart, s_date = secure_filename(chart), secure_filename(date)
+    try:
+        with open("cache/{}/{}.json".format(s_chart, s_date), "w") as f:
+            dump(data, f)
+        return True
+    except:
+        return False
 
 @app.route("/")
 def index():
@@ -17,23 +42,20 @@ def index():
 def chart(chart):
     """ Redirects to /chart/<chart>/<latest date>/ """
     global REDIR
-    REDIR = ChartData(chart)
-    return redirect(url_for("chart_date", chart=chart, date=REDIR.date))
+    if (REDIR and time()-REDIR[0] > 3600) or not REDIR:
+        REDIR = [time(), ChartData(chart)]
+    _ = cache_write(chart, REDIR[1].date, loads(REDIR[1].to_JSON()))
+    return redirect(url_for("chart_date", chart=chart, date=REDIR[1].date))
 
 @app.route("/chart/<chart>/<date>/")
-def chart_date(chart, date=None):
+def chart_date(chart, date):
     """ Returns json for given chart directly from billboard.py """
-    global REDIR
-    if REDIR:
-        data = REDIR
-        REDIR = None
-    else:
-        data = ChartData(chart, date)
-    if len(data) == 0:
+    data = cache_get(chart, date)
+    if len(data["entries"]) == 0:
         return make_response(
-               jsonify({"error": "Invalid chart name (try hot-100)"}), 404
+               jsonify({"error": "Invalid chart name (try hot-100), or date missing (try /chart/<chart>/)"}), 404
                )
-    return jsonify(loads(data.to_JSON()))
+    return jsonify(data)
 
 @app.route("/chart/<chart>/<date>/<id>/")
 def chart_item(chart, date, id):
@@ -44,31 +66,28 @@ def chart_item(chart, date, id):
         return make_response(
                jsonify({"error": "Invalid ID"}), 400
                )
-    data = ChartData(chart, date)
-    if not len(data) > id:
+    data = cache_get(chart, date)
+    if not len(data["entries"]) > id:
         return make_response(
                jsonify({"error": "Given ID not available in chart"}), 404
                )
-    return jsonify(loads(data[id].to_JSON()))
+    return jsonify(data["entries"][id])
 
 @app.route("/chart/<chart>/<date>/<id>/listen")
 def chart_listen(chart, date, id):
-    """ Returns the Spotify listen link for the given song, with a redirect if ?redirect is specified """
+    """ Redirects to the Spotify listen url for the given track ID """
     try:
         id = int(id)-1 if int(id) > 0 else 0
     except ValueError:
         return make_response(
                jsonify({"error": "Invalid ID"}), 400
                )
-    data = ChartData(chart, date)
-    if not len(data) > id:
+    data = cache_get(chart, date)
+    if not len(data["entries"]) > id:
         return make_response(
                jsonify({"error": "Given ID not available in chart"}), 404
                )
-    if "redirect" in request.args:
-        return redirect(loads(data[id].to_JSON())["spotifyLink"])
-    else:
-        return jsonify({"listen": loads(data[id].to_JSON())["spotifyLink"]})
+    return redirect(data["entries"][id]["spotifyLink"])
 
 if __name__ == "__main__":
     app.run(debug=True, port=23718)
