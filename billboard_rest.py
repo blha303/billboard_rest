@@ -82,7 +82,16 @@ def cache_write(chart, date, data):
 @crossdomain(origin='*')
 def index():
     """ Lists available endpoints """
-    return jsonify({rule.rule: globals()[rule.endpoint].__doc__ for rule in app.url_map.iter_rules() if rule.endpoint != "static"})
+    return jsonify({
+        "endpoints": {
+            rule.rule: {
+                "docs": globals()[rule.endpoint].__doc__,
+                "example": rule.rule.replace("<chart>", "hot-100").replace("<date>", "2016-04-02").replace("<id>", "1")
+            } for rule in app.url_map.iter_rules() if rule.endpoint != "static"
+        },
+        "source": "https://github.com/blha303/billboard_rest",
+        "license": "MIT"
+    })
 
 @app.route("/chart/<chart>/")
 @crossdomain(origin='*')
